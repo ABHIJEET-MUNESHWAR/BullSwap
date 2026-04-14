@@ -1,0 +1,61 @@
+# =============================================================================
+# BullSwap Docker Compose — Full stack (App + PostgreSQL)
+# =============================================================================
+#
+# Start:    docker compose up -d
+# Stop:     docker compose down
+# Logs:     docker compose logs -f bullswap
+# Rebuild:  docker compose up -d --build
+# Reset DB: docker compose down -v && docker compose up -d
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: bullswap-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bullswap
+      POSTGRES_PASSWORD: bullswap
+      POSTGRES_DB: bullswap
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bullswap -d bullswap"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # BullSwap Application
+  # ---------------------------------------------------------------------------
+  bullswap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bullswap-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://bullswap:bullswap@postgres:5432/bullswap
+      HOST: 0.0.0.0
+      PORT: 8080
+      LOG_LEVEL: info
+      BATCH_INTERVAL_SECS: 30
+      MAX_ORDERS_PER_BATCH: 1000
+      # SOLVER_THREADS: 4
+      # API_KEY: your-secret-key
+
+volumes:
+  pgdata:
+    driver: local
+

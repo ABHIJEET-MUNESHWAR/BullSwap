@@ -1,0 +1,1135 @@
+{
+	"info": {
+		"_postman_id": "bullswap-collection-v1",
+		"name": "BullSwap API",
+		"description": "BullSwap — A batch auction-based decentralized exchange aggregator built in Rust.\n\nBase URL: http://localhost:8080\n\nThis collection covers all REST API endpoints for orders, batches, settlements, tokens, and health checks.\n\n## Getting Started\n1. Start the server: `cargo run` or `docker compose up -d`\n2. Import this collection into Postman\n3. Set the `base_url` variable if not using localhost:8080\n4. Run the \"Health Check\" request first to verify connectivity\n5. Use the \"List Tokens\" request to get seed token IDs\n6. Create orders using the seeded ETH and USDC token IDs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "eth_token_id",
+			"value": "a0000000-0000-0000-0000-000000000001",
+			"type": "string",
+			"description": "Seeded ETH token UUID"
+		},
+		{
+			"key": "usdc_token_id",
+			"value": "a0000000-0000-0000-0000-000000000002",
+			"type": "string",
+			"description": "Seeded USDC token UUID"
+		},
+		{
+			"key": "dai_token_id",
+			"value": "a0000000-0000-0000-0000-000000000003",
+			"type": "string",
+			"description": "Seeded DAI token UUID"
+		},
+		{
+			"key": "wbtc_token_id",
+			"value": "a0000000-0000-0000-0000-000000000004",
+			"type": "string",
+			"description": "Seeded WBTC token UUID"
+		},
+		{
+			"key": "order_uid",
+			"value": "",
+			"type": "string",
+			"description": "Auto-populated after creating an order"
+		},
+		{
+			"key": "batch_id",
+			"value": "",
+			"type": "string",
+			"description": "Auto-populated after listing batches"
+		}
+	],
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has status ok', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('ok');",
+									"    pm.expect(jsonData.database).to.eql('connected');",
+									"});",
+									"",
+									"pm.test('Response has version', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.version).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Check server and database health.\n\nReturns 200 if healthy, 503 if database is unreachable."
+					},
+					"response": []
+				}
+			],
+			"description": "Server health and readiness checks."
+		},
+		{
+			"name": "Tokens",
+			"item": [
+				{
+					"name": "List Tokens",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response is an array', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});",
+									"",
+									"pm.test('Seeded tokens exist', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.length).to.be.at.least(5);",
+									"    var symbols = jsonData.map(t => t.symbol);",
+									"    pm.expect(symbols).to.include('ETH');",
+									"    pm.expect(symbols).to.include('USDC');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/tokens",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "tokens"]
+						},
+						"description": "List all registered tokens.\n\nThe database is seeded with ETH, USDC, DAI, WBTC, and USDT on startup."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 201', function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test('Token has required fields', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.id).to.be.a('string');",
+									"    pm.expect(jsonData.symbol).to.eql('LINK');",
+									"    pm.expect(jsonData.name).to.eql('Chainlink');",
+									"    pm.expect(jsonData.decimals).to.eql(18);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"symbol\": \"LINK\",\n    \"name\": \"Chainlink\",\n    \"decimals\": 18,\n    \"address\": \"0x514910771AF9Ca656af840dff83E8264EcF986CA\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/tokens",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "tokens"]
+						},
+						"description": "Register a new token.\n\nThe `address` field must be unique across all tokens."
+					},
+					"response": []
+				}
+			],
+			"description": "Token whitelist management."
+		},
+		{
+			"name": "Orders",
+			"item": [
+				{
+					"name": "Create Order — Sell ETH for USDC",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 201', function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test('Order has required fields', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.uid).to.be.a('string');",
+									"    pm.expect(jsonData.owner).to.eql('0xAlice');",
+									"    pm.expect(jsonData.status).to.eql('open');",
+									"    pm.expect(jsonData.batch_id).to.be.null;",
+									"});",
+									"",
+									"// Save order UID for later requests",
+									"var jsonData = pm.response.json();",
+									"pm.collectionVariables.set('order_uid', jsonData.uid);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xAlice\",\n    \"sell_token\": \"{{eth_token_id}}\",\n    \"buy_token\": \"{{usdc_token_id}}\",\n    \"sell_amount\": \"1.5\",\n    \"buy_amount\": \"3000\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xabcdef1234567890\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Submit a new order to sell 1.5 ETH for at least 3000 USDC.\n\nThe order UID is auto-saved to the `order_uid` variable for subsequent requests."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Order — Buy ETH with USDC (Counter-order)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 201', function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test('Order is open', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('open');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xBob\",\n    \"sell_token\": \"{{usdc_token_id}}\",\n    \"buy_token\": \"{{eth_token_id}}\",\n    \"sell_amount\": \"3200\",\n    \"buy_amount\": \"1.5\",\n    \"kind\": \"Buy\",\n    \"signature\": \"0x9876543210fedcba\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Submit a counter-order: Bob wants to buy 1.5 ETH with up to 3200 USDC.\n\nThis order overlaps with Alice's sell order, enabling a CoW (Coincidence of Wants) match in the next batch."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Order — DAI to USDC",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 201', function () {",
+									"    pm.response.to.have.status(201);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xCharlie\",\n    \"sell_token\": \"{{dai_token_id}}\",\n    \"buy_token\": \"{{usdc_token_id}}\",\n    \"sell_amount\": \"5000\",\n    \"buy_amount\": \"4990\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xcharlie_sig_123\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Submit an order to swap 5000 DAI for at least 4990 USDC (stablecoin swap)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Order by UID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Order matches requested UID', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.uid).to.be.a('string');",
+									"    pm.expect(jsonData.owner).to.be.a('string');",
+									"    pm.expect(jsonData.sell_amount).to.be.a('string');",
+									"    pm.expect(jsonData.buy_amount).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders/{{order_uid}}",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders", "{{order_uid}}"]
+						},
+						"description": "Retrieve a single order by its UID.\n\nUses the `order_uid` variable auto-saved from the \"Create Order\" request."
+					},
+					"response": []
+				},
+				{
+					"name": "List All Orders",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response is an array', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "List all orders with default pagination (limit=20, offset=0)."
+					},
+					"response": []
+				},
+				{
+					"name": "List Orders — Filter by Owner",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('All orders belong to 0xAlice', function () {",
+									"    var jsonData = pm.response.json();",
+									"    jsonData.forEach(function(order) {",
+									"        pm.expect(order.owner).to.eql('0xAlice');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders?owner=0xAlice",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"],
+							"query": [
+								{
+									"key": "owner",
+									"value": "0xAlice"
+								}
+							]
+						},
+						"description": "Filter orders by owner address."
+					},
+					"response": []
+				},
+				{
+					"name": "List Orders — Filter by Status",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('All orders have open status', function () {",
+									"    var jsonData = pm.response.json();",
+									"    jsonData.forEach(function(order) {",
+									"        pm.expect(order.status).to.eql('open');",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders?status=open&limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"],
+							"query": [
+								{
+									"key": "status",
+									"value": "open"
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Filter orders by status. Valid values: open, matched, settled, cancelled, expired."
+					},
+					"response": []
+				},
+				{
+					"name": "List Orders — Pagination",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders?limit=10&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Paginate through orders.\n\n- `limit`: 1–100 (default: 20)\n- `offset`: 0+ (default: 0)"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 204', function () {",
+									"    pm.response.to.have.status(204);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders/{{order_uid}}",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders", "{{order_uid}}"]
+						},
+						"description": "Cancel an open order.\n\nOnly orders with status `open` can be cancelled. Returns 204 No Content on success."
+					},
+					"response": []
+				}
+			],
+			"description": "Order management — submit, query, and cancel trading orders."
+		},
+		{
+			"name": "Orders — Validation Errors",
+			"item": [
+				{
+					"name": "Create Order — Zero Amount (400)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 400', function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test('Error message mentions amount', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.error).to.eql('validation_error');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xAlice\",\n    \"sell_token\": \"{{eth_token_id}}\",\n    \"buy_token\": \"{{usdc_token_id}}\",\n    \"sell_amount\": \"0\",\n    \"buy_amount\": \"3000\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xabc\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Attempt to create an order with sell_amount = 0. Should return 400."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Order — Same Token (400)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 400', function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test('Error mentions different tokens', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('different');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xAlice\",\n    \"sell_token\": \"{{eth_token_id}}\",\n    \"buy_token\": \"{{eth_token_id}}\",\n    \"sell_amount\": \"1.0\",\n    \"buy_amount\": \"1.0\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xabc\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Attempt to create an order with sell_token == buy_token. Should return 400."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Order — Expired (400)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 400', function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test('Error mentions future', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('future');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xAlice\",\n    \"sell_token\": \"{{eth_token_id}}\",\n    \"buy_token\": \"{{usdc_token_id}}\",\n    \"sell_amount\": \"1.0\",\n    \"buy_amount\": \"3000\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xabc\",\n    \"valid_to\": \"2020-01-01T00:00:00Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Attempt to create an order with valid_to in the past. Should return 400."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Order — Invalid Token (400)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 400', function () {",
+									"    pm.response.to.have.status(400);",
+									"});",
+									"",
+									"pm.test('Error mentions token', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.message).to.include('token');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xAlice\",\n    \"sell_token\": \"00000000-0000-0000-0000-000000000099\",\n    \"buy_token\": \"{{usdc_token_id}}\",\n    \"sell_amount\": \"1.0\",\n    \"buy_amount\": \"3000\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xabc\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						},
+						"description": "Attempt to create an order with a non-existent sell_token. Should return 400."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Order — Not Found (404)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 404', function () {",
+									"    pm.response.to.have.status(404);",
+									"});",
+									"",
+									"pm.test('Error type is not_found', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.error).to.eql('not_found');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders/00000000-0000-0000-0000-000000000099",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders", "00000000-0000-0000-0000-000000000099"]
+						},
+						"description": "Attempt to retrieve an order that doesn't exist. Should return 404."
+					},
+					"response": []
+				}
+			],
+			"description": "Edge case and validation error scenarios for orders."
+		},
+		{
+			"name": "Batches",
+			"item": [
+				{
+					"name": "List Batches",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response is an array', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.be.an('array');",
+									"});",
+									"",
+									"// Save first batch ID if available",
+									"var jsonData = pm.response.json();",
+									"if (jsonData.length > 0) {",
+									"    pm.collectionVariables.set('batch_id', jsonData[0].id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/batches?limit=20&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "batches"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "List recent batches with pagination.\n\nBatch statuses: collecting, solving, settled, failed.\n\nThe first batch ID is auto-saved to the `batch_id` variable."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Batch by ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Batch has required fields', function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.id).to.be.a('string');",
+									"    pm.expect(jsonData.status).to.be.a('string');",
+									"    pm.expect(jsonData.created_at).to.be.a('string');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/batches/{{batch_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "batches", "{{batch_id}}"]
+						},
+						"description": "Get details of a specific batch by its ID.\n\nUses the `batch_id` variable auto-saved from \"List Batches\"."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Batch — Not Found (404)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 404', function () {",
+									"    pm.response.to.have.status(404);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/batches/00000000-0000-0000-0000-000000000099",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "batches", "00000000-0000-0000-0000-000000000099"]
+						},
+						"description": "Attempt to get a batch that doesn't exist. Should return 404."
+					},
+					"response": []
+				}
+			],
+			"description": "Batch auction lifecycle — list and inspect batches."
+		},
+		{
+			"name": "Settlements",
+			"item": [
+				{
+					"name": "Get Settlement by Batch ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Settlement may or may not exist depending on batch status",
+									"pm.test('Status code is 200 or 404', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Settlement has required fields', function () {",
+									"        var jsonData = pm.response.json();",
+									"        pm.expect(jsonData.settlement).to.be.an('object');",
+									"        pm.expect(jsonData.trades).to.be.an('array');",
+									"        pm.expect(jsonData.clearing_prices).to.be.an('array');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/settlements/{{batch_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "settlements", "{{batch_id}}"]
+						},
+						"description": "Get the winning settlement for a settled batch.\n\nIncludes:\n- Settlement metadata (solver, objective value, surplus)\n- All trades (order UID, executed amounts, surplus per trade)\n- Clearing prices per token\n\nReturns 404 if the batch hasn't been settled yet."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Settlement — Not Found (404)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 404', function () {",
+									"    pm.response.to.have.status(404);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/settlements/00000000-0000-0000-0000-000000000099",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "settlements", "00000000-0000-0000-0000-000000000099"]
+						},
+						"description": "Attempt to get a settlement for a batch that doesn't exist. Should return 404."
+					},
+					"response": []
+				}
+			],
+			"description": "Settlement details — trades, clearing prices, and surplus."
+		},
+		{
+			"name": "Workflow — Full CoW Match",
+			"item": [
+				{
+					"name": "1. Verify Health",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Server is healthy', function () {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(pm.response.json().status).to.eql('ok');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2. List Available Tokens",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Tokens available', function () {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(pm.response.json().length).to.be.at.least(2);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/tokens",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "tokens"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3. Alice Sells ETH for USDC",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Order created', function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"pm.collectionVariables.set('order_uid', pm.response.json().uid);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xAlice\",\n    \"sell_token\": \"{{eth_token_id}}\",\n    \"buy_token\": \"{{usdc_token_id}}\",\n    \"sell_amount\": \"2.0\",\n    \"buy_amount\": \"3800\",\n    \"kind\": \"Sell\",\n    \"signature\": \"0xalice_workflow_sig\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4. Bob Buys ETH with USDC",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Counter-order created', function () {",
+									"    pm.response.to.have.status(201);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner\": \"0xBob\",\n    \"sell_token\": \"{{usdc_token_id}}\",\n    \"buy_token\": \"{{eth_token_id}}\",\n    \"sell_amount\": \"4000\",\n    \"buy_amount\": \"2.0\",\n    \"kind\": \"Buy\",\n    \"signature\": \"0xbob_workflow_sig\",\n    \"valid_to\": \"2026-12-31T23:59:59Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5. Check Open Orders",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Open orders exist', function () {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(pm.response.json().length).to.be.at.least(1);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/orders?status=open",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "orders"],
+							"query": [{"key": "status", "value": "open"}]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "6. Wait for Batch Settlement (30s)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Wait for the batch timer to process orders",
+									"// Default batch interval is 30 seconds",
+									"console.log('Waiting 35 seconds for batch settlement...');",
+									"setTimeout(function() {}, 35000);"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Batches exist', function () {",
+									"    pm.response.to.have.status(200);",
+									"    var batches = pm.response.json();",
+									"    pm.expect(batches.length).to.be.at.least(1);",
+									"    pm.collectionVariables.set('batch_id', batches[0].id);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/batches?limit=5",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "batches"],
+							"query": [{"key": "limit", "value": "5"}]
+						},
+						"description": "After waiting ~30s for the batch timer, check for settled batches."
+					},
+					"response": []
+				},
+				{
+					"name": "7. Check Settlement Results",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 200 or 404', function () {",
+									"    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+									"});",
+									"",
+									"if (pm.response.code === 200) {",
+									"    pm.test('Settlement has trades', function () {",
+									"        var data = pm.response.json();",
+									"        pm.expect(data.trades.length).to.be.at.least(1);",
+									"        pm.expect(data.settlement.surplus_total).to.be.a('string');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/v1/settlements/{{batch_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["v1", "settlements", "{{batch_id}}"]
+						},
+						"description": "Check if the batch was settled and inspect the trades and surplus."
+					},
+					"response": []
+				}
+			],
+			"description": "End-to-end workflow demonstrating a Coincidence of Wants match:\n\n1. Health check\n2. List tokens\n3. Alice submits sell ETH order\n4. Bob submits counter buy ETH order\n5. Verify open orders\n6. Wait for batch timer (~30s)\n7. Check settlement with trades and surplus\n\nRun steps sequentially using Postman Collection Runner."
+		}
+	]
+}
+

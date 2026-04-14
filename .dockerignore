@@ -1,0 +1,16 @@
+target/
+.git/
+.github/
+.gitignore
+.idea/
+.env
+.env.example
+*.md
+benches/
+tests/
+EVALUATION.md
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+
