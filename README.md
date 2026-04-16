@@ -77,34 +77,344 @@ BullSwap is inspired by [CoW Protocol](https://cow.fi/) and implements a batch a
 ### Batch Auction Lifecycle
 
 ```
-   ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-   │Collecting │────▶│ Solving  │────▶│ Settled  │────▶│   New    │
-   │  Orders   │     │  Batch   │     │  Batch   │     │  Batch   │
-   └──────────┘     └──────────┘     └──────────┘     └──────────┘
-       │                 │                 │
-   Orders arrive   Solvers compete    Trades + prices
-   via REST API    (parallel/Rayon)   persisted to DB
+   ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+   │  Collecting   │────▶│   Solving    │────▶│   Settled    │────▶│ New Batch    │
+   │  (accepting   │     │  (closed to  │     │  (trades +   │     │ (cycle       │
+   │   orders)     │     │   new orders)│     │  prices saved)│     │  restarts)   │
+   └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+         │                     │                     │
+    Orders arrive        Solvers compete       Settlement persisted
+    via REST API         in parallel (Rayon)    atomically to DB
 ```
 
-1. **Collect**: Orders are submitted via `POST /v1/orders` and stored in the database
-2. **Close**: Every `BATCH_INTERVAL_SECS` (default: 30s), the batch timer closes the current batch
-3. **Solve**: All registered solvers run in parallel via Rayon:
-   - **CoW Finder**: Matches opposing orders directly (O(n log n))
-   - **Optimizer**: Computes uniform clearing prices for remaining orders
-   - **Surplus Calculator**: Distributes price improvement to traders
-4. **Rank**: The solver with the highest objective score (total surplus) wins
-5. **Settle**: Winning settlement is persisted atomically with all trades
-6. **Repeat**: A new collecting batch is created automatically
+#### Step-by-Step Walkthrough
 
-### Coincidence of Wants (CoW)
+1. **Startup — Initial Batch Creation**
+   - On application boot, `batch_timer::run_batch_timer` spawns as a Tokio background task.
+   - It calls `BatchService::ensure_collecting_batch()`, which checks PostgreSQL for a batch with `status = 'collecting'`. If none exists, it `INSERT`s one via `BatchRepo::create()`.
+   - The system is now ready to accept orders into this batch window.
+
+2. **Collect — Order Submission (`POST /v1/orders`)**
+   - A trader submits a JSON body with `owner`, `sell_token`, `buy_token`, `sell_amount`, `buy_amount`, `kind` (Sell/Buy), `signature`, and `valid_to`.
+   - **Validation pipeline** (`OrderService::validate_order`):
+     - `owner` must be non-empty
+     - `sell_amount > 0` and `buy_amount > 0` (enforced via `rust_decimal::Decimal`)
+     - `sell_token ≠ buy_token` (prevents no-op trades)
+     - `valid_to > now()` (rejects already-expired orders)
+     - `signature` must be non-empty
+   - **Token existence check**: Both `sell_token` and `buy_token` are verified against the `tokens` table via `TokenRepo::exists()`. Unknown tokens are rejected with a 400 error.
+   - A unique `OrderUid(Uuid::new_v4())` is generated and the order is `INSERT`ed into the `orders` table with `status = 'open'` and `batch_id = NULL` (unassigned).
+   - Returns `201 Created` with the full order JSON.
+
+3. **Timer Tick — Batch Closing**
+   - Every `BATCH_INTERVAL_SECS` (default 30s), the batch timer wakes and calls `BatchService::close_and_solve()`.
+   - **Step 3a — Expire stale orders**: `OrderRepo::expire_orders()` runs `UPDATE orders SET status = 'expired' WHERE status = 'open' AND valid_to < NOW()`, marking any orders whose `valid_to` timestamp has passed.
+   - **Step 3b — Fetch open unassigned orders**: `OrderRepo::find_open_unassigned()` runs `SELECT * FROM orders WHERE status = 'open' AND batch_id IS NULL ORDER BY created_at ASC LIMIT $max_orders`.
+   - If no orders are found, the batch is skipped (a new collecting batch is created and the cycle restarts).
+
+4. **Assign — Bind Orders to Batch**
+   - All fetched order UIDs are batch-updated: `OrderRepo::assign_to_batch()` runs `UPDATE orders SET batch_id = $1 WHERE uid = ANY($2)`.
+   - The batch status transitions from `Collecting` → `Solving` via `BatchRepo::update_status()`.
+
+5. **Solve — Parallel Solver Competition**
+   - A `SolverCompetition` is constructed with `Vec<Arc<dyn BatchSolver>>` — currently multiple instances of `NaiveSolver`, each with a unique `solver_id`.
+   - `competition.run(&orders, batch_id)` dispatches all solvers in parallel using **Rayon's `par_iter()`**, leveraging all available CPU cores via a work-stealing thread pool.
+   - Each solver independently executes the full solve pipeline (see [NaiveSolver Pipeline](#naivesolver-pipeline) below).
+   - Results are collected and ranked by `score` (total surplus in `Decimal`). The solver with the **highest objective score** wins.
+   - If all solvers fail (return `Err`), the competition returns `None`.
+
+6. **Settle — Persist Winning Solution**
+   - `SettlementService::persist_settlement()` writes the winning `Settlement`, all `Trade` rows, and all `ClearingPrice` rows **atomically inside a single PostgreSQL transaction** (`sqlx::Transaction`).
+   - Batch status transitions from `Solving` → `Settled`.
+   - All orders in the batch have their status updated to `settled` via `OrderRepo::update_batch_orders_status()`.
+
+7. **Failure Recovery**
+   - If no solver produces a valid solution, the batch transitions to `Failed`.
+   - All assigned orders are returned to `status = 'open'` so they re-enter the next batch cycle.
+   - `ensure_collecting_batch()` is called to guarantee a new batch is available.
+
+8. **Repeat — New Collecting Batch**
+   - Regardless of success or failure, `BatchRepo::create()` inserts a fresh collecting batch.
+   - The timer sleeps for `BATCH_INTERVAL_SECS` and the cycle repeats.
+
+---
+
+### NaiveSolver Pipeline
+
+Each `NaiveSolver` instance executes the following three-phase pipeline:
 
 ```
-  Alice                         Bob
-  Sells 100 ETH ──────────▶ Buys 100 ETH
-  Buys 200K USDC ◀────────── Sells 200K USDC
+  Orders ──▶ Phase 1: CoW Finder ──▶ Phase 2: Optimizer ──▶ Phase 3: Surplus ──▶ SolveResult
+              (direct matching)       (clearing prices)      (distribution)
+```
 
-  Direct match! No liquidity pool needed.
-  Both get better prices than on any DEX.
+#### Phase 1 — Coincidence of Wants (CoW Finder)
+
+```
+  Input: All matchable orders in the batch
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ 1. Filter: Only orders with status=Open AND valid_to > now()      │
+  │ 2. Group: Orders bucketed by (sell_token, buy_token) pair         │
+  │    e.g., (ETH→USDC) and (USDC→ETH) are opposing groups           │
+  │ 3. For each pair (A→B), find counter-pair (B→A):                  │
+  │    a. Forward orders (A→B): compute limit_price = sell/buy        │
+  │       Sort DESCENDING (most generous sellers first)               │
+  │    b. Backward orders (B→A): compute limit_price = buy/sell      │
+  │       Sort ASCENDING (least demanding buyers first)               │
+  │ 4. Two-pointer greedy match:                                      │
+  │    While seller_price >= buyer_price (prices overlap):            │
+  │      • clearing_price = midpoint of overlap                       │
+  │      • matched_amount_A = min(seller_available, buyer_wants)      │
+  │      • matched_amount_B = matched_A / clearing_price              │
+  │      • Compute surplus for both sides                             │
+  │      • Emit CowMatch, advance both pointers                       │
+  │ 5. Output: Vec<CowMatch> + Vec<unmatched_indices>                 │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  Time: O(n log n)  Space: O(n)
+```
+
+**Surplus in CoW matching:**
+- Seller surplus: `matched_B - (matched_A × buy_amount / sell_amount)` — the seller got more buy-token than their minimum.
+- Buyer surplus: `(matched_A × sell_amount_buyer / buy_amount_buyer) - matched_B` — the buyer paid less sell-token than their maximum.
+
+**Example — Perfect CoW Match:**
+```
+  Alice: Sell 100 ETH, want ≥ 50 USDC    (limit price: 2 ETH/USDC)
+  Bob:   Sell 50 USDC, want ≥ 100 ETH    (limit price: 2 ETH/USDC)
+
+  Prices match exactly → clearing_price = 2.0
+  Alice sends 100 ETH → Bob
+  Bob sends 50 USDC → Alice
+  Surplus = 0 (prices matched exactly, no improvement possible)
+```
+
+**Example — Overlapping Prices with Surplus:**
+```
+  Alice: Sell 100 ETH, want ≥ 40 USDC    (willing to pay up to 2.5 ETH/USDC)
+  Bob:   Sell 60 USDC, want ≥ 100 ETH    (will accept as low as 1.67 ETH/USDC)
+
+  Overlap range: [1.67, 2.5] → clearing_price = 2.083
+  Alice sends 100 ETH, receives 48 USDC   (wanted 40, surplus = 8 USDC)
+  Bob sends 48 USDC, receives 100 ETH     (offered 60, saved 12 USDC)
+  Both sides benefit from the overlap!
+```
+
+#### Phase 2 — Uniform Clearing Price Optimizer
+
+Runs on **unmatched orders** remaining after CoW matching:
+
+```
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ 1. Group unmatched orders by (sell_token, buy_token)              │
+  │ 2. For each pair with opposing orders:                            │
+  │    a. Compute seller limit prices, sort ascending (best ask)      │
+  │    b. Compute buyer effective prices, sort descending (best bid)  │
+  │    c. If best_ask ≤ best_bid → market crosses:                   │
+  │       clearing_price = (best_ask + best_bid) / 2                 │
+  │    d. Store price[sell_token] = clearing_price                    │
+  │       Store price[buy_token] = 1 / clearing_price                │
+  │ 3. Optimize execution:                                            │
+  │    For each matchable order with valid clearing prices:           │
+  │    • effective_buy = sell_amount × price[sell] / price[buy]       │
+  │    • Execute only if effective_buy ≥ order.buy_amount             │
+  │      (trader gets at least their limit price)                     │
+  │ 4. Output: Vec<(order_index, executed_sell, executed_buy)>        │
+  └────────────────────────────────────────────────────────────────────┘
+
+  Time: O(n log n)  Space: O(n)
+```
+
+**Key property**: All orders in the same token pair get the **same uniform clearing price**. This is what prevents MEV — no individual order can be front-run because the price is determined collectively.
+
+#### Phase 3 — Surplus Calculation & Distribution
+
+```
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ For each executed trade:                                          │
+  │   expected_buy = buy_amount × executed_sell / sell_amount         │
+  │   surplus = max(0, executed_buy − expected_buy)                   │
+  │                                                                    │
+  │ Surplus is the price improvement each trader receives beyond      │
+  │ their limit price. It is returned directly to the trader.         │
+  │                                                                    │
+  │ Total surplus across all trades = solver's objective score.       │
+  │ The solver with the highest total surplus wins the competition.   │
+  └────────────────────────────────────────────────────────────────────┘
+
+  Time: O(n)  Space: O(n)
+```
+
+---
+
+### MEV Protection — Commit-Reveal Scheme
+
+BullSwap includes a commit-reveal mechanism (`solver::mev_protection`) to prevent front-running:
+
+```
+  Phase 1 (Commit)                    Phase 2 (Reveal)
+  ┌──────────────────────┐           ┌──────────────────────┐
+  │ Trader hashes order  │           │ Trader reveals order │
+  │ details + nonce:     │           │ details + nonce      │
+  │                      │           │                      │
+  │ commitment = SHA256( │    ──▶    │ Server recomputes    │
+  │   owner ‖ sell_token │           │ hash and verifies    │
+  │   ‖ buy_token        │           │ constant_time_eq()   │
+  │   ‖ sell_amount      │           │                      │
+  │   ‖ buy_amount       │           │ If match → accept    │
+  │   ‖ nonce            │           │ If mismatch → reject │
+  │ )                    │           │                      │
+  └──────────────────────┘           └──────────────────────┘
+
+  Miners/validators cannot see order details during the commit phase,
+  preventing sandwich attacks and front-running.
+  Signature verification uses constant-time comparison to prevent timing attacks.
+```
+
+---
+
+### API Flow Details
+
+#### Order Submission Flow
+
+```
+  Client                    API Layer               Service Layer            Database
+    │                          │                         │                      │
+    │  POST /v1/orders         │                         │                      │
+    │  {owner, sell_token,     │                         │                      │
+    │   buy_token, amounts,    │                         │                      │
+    │   kind, sig, valid_to}   │                         │                      │
+    │─────────────────────────▶│                         │                      │
+    │                          │  Deserialize JSON       │                      │
+    │                          │  (Serde + Actix)        │                      │
+    │                          │─────────────────────────▶                      │
+    │                          │  validate_order()       │                      │
+    │                          │  • owner non-empty      │                      │
+    │                          │  • amounts > 0          │                      │
+    │                          │  • tokens differ        │                      │
+    │                          │  • valid_to > now       │                      │
+    │                          │  • sig non-empty        │                      │
+    │                          │                         │  TokenRepo::exists() │
+    │                          │                         │─────────────────────▶│
+    │                          │                         │  sell_token exists?  │
+    │                          │                         │◀─────────────────────│
+    │                          │                         │  buy_token exists?   │
+    │                          │                         │─────────────────────▶│
+    │                          │                         │◀─────────────────────│
+    │                          │                         │  OrderRepo::insert() │
+    │                          │                         │  (uid, status=open,  │
+    │                          │                         │   batch_id=NULL)     │
+    │                          │                         │─────────────────────▶│
+    │                          │                         │◀─────────────────────│
+    │  201 Created {order}     │◀────────────────────────│                      │
+    │◀─────────────────────────│                         │                      │
+```
+
+#### Order Cancellation Flow
+
+```
+  Client                    API Layer               Service Layer            Database
+    │                          │                         │                      │
+    │  DELETE /v1/orders/{uid} │                         │                      │
+    │─────────────────────────▶│                         │                      │
+    │                          │─────────────────────────▶                      │
+    │                          │  get_order(uid)         │  find_by_uid()       │
+    │                          │                         │─────────────────────▶│
+    │                          │                         │◀─────────────────────│
+    │                          │  Check status == Open   │                      │
+    │                          │  (reject if matched/    │                      │
+    │                          │   settled/cancelled)    │                      │
+    │                          │                         │  cancel(uid)         │
+    │                          │                         │  SET status=cancelled│
+    │                          │                         │─────────────────────▶│
+    │                          │                         │◀─────────────────────│
+    │  204 No Content          │◀────────────────────────│                      │
+    │◀─────────────────────────│                         │                      │
+```
+
+#### Batch Solving Flow (Internal — Triggered by Timer)
+
+```
+  Batch Timer              BatchService              Solver Engine            Database
+    │                          │                         │                      │
+    │  tick (every 30s)        │                         │                      │
+    │─────────────────────────▶│                         │                      │
+    │                          │  expire_orders()        │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │                          │  UPDATE status=expired  │                      │
+    │                          │  WHERE valid_to < NOW() │                      │
+    │                          │◀─────────────────────────────────────────────────
+    │                          │                         │                      │
+    │                          │  find_open_unassigned() │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │                          │  SELECT WHERE status=   │                      │
+    │                          │  open AND batch_id NULL │                      │
+    │                          │◀─────────────────────────────────────────────────
+    │                          │                         │                      │
+    │                          │  [if orders found]      │                      │
+    │                          │  assign_to_batch()      │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │                          │  batch → Solving        │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │                          │                         │                      │
+    │                          │  ┌──────────────────────────────────────────┐  │
+    │                          │  │       SolverCompetition (Rayon)          │  │
+    │                          │  │                                          │  │
+    │                          │  │  Thread 1: NaiveSolver A                │  │
+    │                          │  │    → CoW Finder → Optimizer → Surplus   │  │
+    │                          │  │    → SolveResult { score: 15.4 }        │  │
+    │                          │  │                                          │  │
+    │                          │  │  Thread 2: NaiveSolver B                │  │
+    │                          │  │    → CoW Finder → Optimizer → Surplus   │  │
+    │                          │  │    → SolveResult { score: 15.4 }        │  │
+    │                          │  │                                          │  │
+    │                          │  │  ... Thread N (one per CPU core) ...    │  │
+    │                          │  │                                          │  │
+    │                          │  │  Winner = max(score)                    │  │
+    │                          │  └──────────────────────────────────────────┘  │
+    │                          │                         │                      │
+    │                          │  [if winner found]      │                      │
+    │                          │  persist_settlement()   │                      │
+    │                          │  (BEGIN TRANSACTION)    │                      │
+    │                          │  INSERT settlement      │                      │
+    │                          │  INSERT trades (batch)  │                      │
+    │                          │  INSERT clearing_prices │                      │
+    │                          │  (COMMIT)               │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │                          │  batch → Settled        │                      │
+    │                          │  orders → settled       │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │                          │                         │                      │
+    │                          │  [if no winner]         │                      │
+    │                          │  batch → Failed         │                      │
+    │                          │  orders → open (retry)  │                      │
+    │                          │                         │                      │
+    │                          │  Create new collecting  │                      │
+    │                          │  batch for next cycle   │                      │
+    │                          │─────────────────────────────────────────────────▶
+    │  cycle complete          │◀────────────────────────│                      │
+    │◀─────────────────────────│                         │                      │
+```
+
+#### Settlement Query Flow
+
+```
+  Client                    API Layer                Database
+    │                          │                        │
+    │  GET /v1/settlements/    │                        │
+    │      {batch_id}          │                        │
+    │─────────────────────────▶│                        │
+    │                          │  SELECT settlement     │
+    │                          │  JOIN trades           │
+    │                          │  JOIN clearing_prices  │
+    │                          │  WHERE batch_id = $1   │
+    │                          │────────────────────────▶
+    │                          │◀────────────────────────
+    │  200 OK                  │                        │
+    │  {settlement, trades[],  │                        │
+    │   clearing_prices[]}     │                        │
+    │◀─────────────────────────│                        │
 ```
 
 ---
