@@ -28,9 +28,14 @@ BullSwap is inspired by [CoW Protocol](https://cow.fi/) and implements a batch a
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│                     Cross-Cutting Concerns                   │
+│  AppConfig (config.rs) │ Telemetry (telemetry.rs)           │
+│  AppError (errors.rs)  │ Startup (startup.rs)               │
+├─────────────────────────────────────────────────────────────┤
 │                        API Layer                            │
 │  POST /v1/orders  GET /v1/batches  GET /v1/settlements     │
 │  GET /v1/tokens   GET /health      DELETE /v1/orders/{uid}  │
+│  Middleware: RequestID tracing │ API key auth               │
 ├─────────────────────────────────────────────────────────────┤
 │                     Service Layer                           │
 │  OrderService  │  BatchService  │  SettlementService        │
@@ -43,15 +48,106 @@ BullSwap is inspired by [CoW Protocol](https://cow.fi/) and implements a batch a
 │  │  │ Solver 1 │  │ Solver 2 │  │ Solvers  │      │      │
 │  │  └──────────┘  └──────────┘  └──────────┘      │      │
 │  │  CoW Finder → Optimizer → Surplus Calculator     │      │
+│  │  MEV Protection (commit-reveal + signatures)     │      │
 │  └──────────────────────────────────────────────────┘      │
+├─────────────────────────────────────────────────────────────┤
+│                   Domain Layer (Type System)                 │
+│  Order/OrderUid │ Batch/BatchStatus │ Token/TokenPair       │
+│  Settlement/Trade/ClearingPrice │ Solver/SolverResult       │
 ├─────────────────────────────────────────────────────────────┤
 │                   Database Layer (SQLx)                     │
 │  OrderRepo │ BatchRepo │ SettlementRepo │ TokenRepo         │
+│  SolverRepo │ Pool (connection management + migrations)     │
+├─────────────────────────────────────────────────────────────┤
+│                  Background Tasks                           │
+│  BatchTimer (Tokio spawn — periodic batch close & solve)    │
 ├─────────────────────────────────────────────────────────────┤
 │                   PostgreSQL Database                       │
-│  tokens │ orders │ batches │ settlements │ trades           │
+│  tokens │ orders │ batches │ solvers │ settlements │ trades │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Layer-by-Layer Breakdown
+
+#### 1. Cross-Cutting Concerns
+
+These components span the entire application and are used by every layer.
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **AppConfig** | `config.rs` | Typed configuration struct loaded from environment variables (`DATABASE_URL`, `HOST`, `PORT`, `BATCH_INTERVAL_SECS`, `LOG_LEVEL`, `API_KEY`, `MAX_ORDERS_PER_BATCH`, `SOLVER_THREADS`). | Reads env vars via `std::env::var()` with `dotenvy` for `.env` file support. Each variable has a typed parse with a sensible default. `ConfigError` enum reports missing or invalid values at startup. | Centralises all tunables in one place. Fail-fast on misconfiguration — the server won't start with an invalid config. No magic strings scattered across the codebase. |
+| **Telemetry** | `telemetry.rs` | Structured logging and distributed tracing setup. | Initialises `tracing-subscriber` with an `EnvFilter` (respects `RUST_LOG` / `LOG_LEVEL`), a formatting layer that emits thread IDs, thread names, file paths, and line numbers. Integrates with `tracing-actix-web::TracingLogger` middleware for per-request spans. | Every request and background task gets correlated structured logs. In production, operators can filter by span fields (e.g., `batch_id`, `order_uid`) to trace a single order through the entire lifecycle. |
+| **AppError** | `errors.rs` | Unified error type implementing Actix's `ResponseError` trait. Variants: `Validation` (400), `NotFound` (404), `Conflict` (409), `Database` (500, auto-converted from `sqlx::Error` via `#[from]`), `Internal` (500), `Unauthorized` (401), `RateLimited` (429). | Each variant maps to an HTTP status code and a JSON body `{ "error": "type", "message": "..." }`. Uses `thiserror` for derive-based `Display` + `Error` implementations. Every error is logged at `error` level with the error type before the response is sent. | No panics, no unhandled exceptions. Every code path that can fail returns `AppResult<T>` (`Result<T, AppError>`). Database errors are automatically wrapped — no manual conversion needed. Clients get consistent, machine-parseable error responses. |
+| **Startup** | `startup.rs` | Server bootstrap orchestrator. | Executes a strict startup sequence: (1) create PgPool, (2) run SQLx migrations, (3) query active solvers from DB, (4) configure Rayon global thread pool, (5) spawn batch timer as a Tokio task, (6) build and start `HttpServer` with `TracingLogger` middleware, `PgPool` app data, 64KB JSON limit, and route configuration. Workers are set to `num_cpus()`. | Single entry point for the entire application lifecycle. If any step fails (pool creation, migrations), the process exits immediately with a clear error — no half-initialized state. |
+
+#### 2. API Layer (`src/api/`)
+
+The HTTP boundary of the application. Receives requests, deserialises JSON via Serde, delegates to the service layer, and serialises responses.
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **Route Configuration** | `mod.rs` | Central router that mounts all endpoint groups under `/v1` and `/health`. | Uses Actix's `web::scope("/v1")` with `.configure()` calls for each resource module. Health check is mounted at the root level. | Single place to see all routes. Adding a new resource is one line: `.configure(routes_new::configure)`. |
+| **Orders Routes** | `routes_orders.rs` | `POST /v1/orders` (create), `GET /v1/orders/{uid}` (get by UID), `GET /v1/orders` (list with filters), `DELETE /v1/orders/{uid}` (cancel). | Each handler is an `async fn` annotated with `#[tracing::instrument]` for automatic span creation. `web::Json<CreateOrderRequest>` handles deserialization; `web::Path<Uuid>` extracts path params; `web::Query<OrderQueryParams>` extracts query params. Delegates to `OrderService`. | Thin handlers — no business logic lives here. The `tracing::instrument` macro auto-logs the entry/exit of each handler with its arguments, providing observability for free. |
+| **Batches Routes** | `routes_batches.rs` | `GET /v1/batches` (list recent, paginated), `GET /v1/batches/{id}` (get by ID). | Query params `limit` (default 20, max 100) and `offset` (default 0) are clamped to valid ranges. Delegates directly to `BatchRepo` (no service layer needed — read-only). | Batches are created internally by the timer; the API only exposes reads. Pagination prevents unbounded result sets. |
+| **Settlements Routes** | `routes_settlements.rs` | `GET /v1/settlements/{batch_id}` — returns the full settlement (settlement metadata + trades + clearing prices). | Delegates to `SettlementService::get_by_batch_id()`, which assembles the composite `SettlementDetails` from three DB tables. | Single endpoint gives the complete picture of a batch's outcome. Clients can inspect every trade, every clearing price, and the winning solver's score. |
+| **Tokens Routes** | `routes_tokens.rs` | `GET /v1/tokens` (list all), `POST /v1/tokens` (register new). | Delegates directly to `TokenRepo`. Token creation generates a new `Uuid`. | Tokens form the whitelist — orders referencing non-existent tokens are rejected by `OrderService`. |
+| **Health Check** | `routes_health.rs` | `GET /health` — returns `200 OK` with `{"status":"ok","version":"0.1.0","database":"connected"}` or `503` if the database is unreachable. | Runs `SELECT 1` against the pool. Reports the Cargo package version via `env!("CARGO_PKG_VERSION")`. | Load balancers and orchestrators (Docker, Kubernetes) use this to determine if the instance is ready for traffic. |
+| **Middleware** | `middleware.rs` | Two middleware-style functions: `extract_request_id` (reads `X-Request-Id` header or generates a UUID) and `validate_api_key` (checks `Authorization: Bearer <key>` against the configured `API_KEY`). | `extract_request_id` is used for tracing correlation. `validate_api_key` returns `401 Unauthorized` if the key is missing or wrong; if no `API_KEY` is configured, all requests pass. | Request ID propagation enables end-to-end tracing across distributed systems. API key auth is opt-in — useful for production without adding complexity during development. |
+
+#### 3. Service Layer (`src/services/`)
+
+Business logic and validation. Orchestrates calls between the API layer, domain rules, and the database layer.
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **OrderService** | `order_service.rs` | Validates and creates orders; retrieves, lists, and cancels orders. | **Validation pipeline** (`validate_order`): checks owner non-empty, `sell_amount > 0`, `buy_amount > 0`, `sell_token ≠ buy_token`, `valid_to > now()`, signature non-empty. Then verifies both tokens exist via `TokenRepo::exists()`. Only after all checks pass is `OrderRepo::insert()` called. **Cancellation**: loads the order, checks `status == Open`, then calls `OrderRepo::cancel()`. **Listing**: validates the status filter against allowed values (`open`, `matched`, `settled`, `cancelled`, `expired`), clamps `limit` to `[1, 100]`. | Keeps validation logic out of the API layer (testable without HTTP) and out of the DB layer (no triggers or constraints for business rules). Every validation rule is unit tested. |
+| **BatchService** | `batch_service.rs` | Manages the batch auction lifecycle: ensures a collecting batch exists, closes and solves batches. | `close_and_solve()` executes an 8-step pipeline: (1) get collecting batch, (2) expire stale orders, (3) fetch open unassigned orders, (4) assign orders to batch, (5) transition batch to `Solving`, (6) build `SolverCompetition` with `NaiveSolver` instances and run in parallel, (7) persist winning settlement or mark batch as `Failed` and return orders to `Open`, (8) create new collecting batch. | This is the **heart of the system**. It orchestrates the entire batch cycle — the timer calls this once per interval. Failure recovery ensures orders are never lost: if solving fails, orders return to the pool for the next batch. |
+| **SettlementService** | `settlement_service.rs` | Persists winning settlements; retrieves settlement details by batch ID. | `persist_settlement()` maps a `SolveResult` into the tuple format expected by `SettlementRepo::insert_full()` (settlement + trades + clearing prices). `get_by_batch_id()` delegates to `SettlementRepo` and wraps `None` as `AppError::NotFound`. | Decouples the solver's result format from the database schema. The service translates between domain objects and repo arguments. |
+
+#### 4. Solver Engine (`src/solver/`)
+
+The algorithmic core — pure computation with no I/O. This is where the batch auction problem is solved.
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **BatchSolver Trait** | `engine.rs` | Defines the `trait BatchSolver: Send + Sync` interface with methods `name()`, `id()`, and `solve(&[Order], batch_id) → Result<SolveResult, SolverError>`. Also defines `SolverError` (variants: `NoMatchableOrders`, `NoSolution`, `Timeout`, `Internal`). | The trait is object-safe (`dyn BatchSolver`) and `Send + Sync` so solvers can run on Rayon's thread pool. `SolveResult` bundles the `SettlementDetails`, objective `score`, solver metadata, and `duration`. | **Open-Closed Principle**: new solver strategies (e.g., LP-based, genetic algorithm) can be added by implementing this trait — no changes to the competition or batch service. The `Send + Sync` bounds enable safe parallelism. |
+| **NaiveSolver** | `naive_solver.rs` | A three-phase solver: (1) CoW matching, (2) clearing price optimization, (3) surplus distribution. | Phase 1 calls `cow_finder::find_cows()` for direct peer-to-peer matches. Phase 2 takes unmatched orders and runs `optimizer::compute_clearing_prices()` + `optimizer::optimize_execution()`. Phase 3 calls `surplus::distribute_surplus()` for remaining trades. Combines all trades and clearing prices into a `SettlementDetails`, computes total surplus as the objective score. | This is the reference solver. It demonstrates the full pipeline and serves as a baseline. Multiple instances with different IDs compete to ensure determinism and validate the competition framework. |
+| **CoW Finder** | `cow_finder.rs` | Finds Coincidence of Wants — direct matches between opposing orders without external liquidity. | (1) Groups orders by `(sell_token, buy_token)` into a `HashMap`. (2) For each pair (A→B), finds counter-pair (B→A). (3) Computes limit prices: sellers sorted descending (most generous first), buyers sorted ascending (least demanding first). (4) Two-pointer greedy match: while `seller_price ≥ buyer_price`, compute midpoint clearing price, match amounts, calculate surplus for both sides. (5) Returns `CowFinderResult` with matches, unmatched indices, and total surplus. | CoW matching is the most capital-efficient form of trade execution — no AMM fees, no slippage, no external liquidity needed. The greedy algorithm is O(n log n) and produces provably optimal matches for the sorted order. |
+| **Optimizer** | `optimizer.rs` | Computes uniform clearing prices for token pairs and determines which remaining orders can be filled. | `compute_clearing_prices()`: groups orders by pair, computes best ask (lowest seller price) and best bid (highest buyer price), sets clearing price = midpoint if bid ≥ ask. Stores prices for both tokens in the pair. `optimize_execution()`: for each order, computes `effective_buy = sell_amount × price[sell] / price[buy]`; only fills if `effective_buy ≥ buy_amount` (respects limit price). | Uniform clearing prices ensure **fairness**: every trader in the same pair gets the same price, eliminating front-running. Orders that would trade below their limit price are protected — they simply don't execute. |
+| **Surplus Calculator** | `surplus.rs` | Computes per-trade and total surplus. | `calculate_trade_surplus()`: `surplus = max(0, executed_buy - expected_buy)` where `expected_buy = buy_amount × executed_sell / sell_amount`. `calculate_total_surplus()`: sums across all trades. `distribute_surplus()`: returns per-trade surplus amounts. | Surplus is the objective function for the solver competition — the solver that generates the most surplus wins. Surplus represents real value returned to traders: the difference between what they were willing to accept and what they actually received. |
+| **SolverCompetition** | `competition.rs` | Orchestrates parallel execution of multiple solvers and selects the winner. | Constructs a `Vec<Arc<dyn BatchSolver>>`. Calls `par_iter()` (Rayon) to run all solvers simultaneously across CPU cores. Each solver produces an `Option<SolveResult>`. Results are collected and the one with the highest `score` (total surplus) is selected. Logs each solver's outcome (score, duration, trade count). | **Competitive mechanism**: even with identical solvers, this framework is ready for heterogeneous strategies. Rayon's work-stealing scheduler ensures optimal CPU utilisation. The `Arc<dyn BatchSolver>` allows solvers to be cheaply shared across threads. |
+| **MEV Protection** | `mev_protection.rs` | Commit-reveal scheme and signature utilities to prevent front-running. | `create_commitment()`: SHA-256 hash of `owner ‖ sell_token ‖ buy_token ‖ sell_amount ‖ buy_amount ‖ nonce`. `verify_commitment()`: recomputes hash and uses `constant_time_eq()` (XOR-based, timing-attack resistant) to compare. `sign_order()` / `verify_signature()`: HMAC-style signing with `SHA-256("BullSwap-v1:" ‖ owner ‖ ":" ‖ order_data ‖ ":" ‖ secret)`. | Miners/validators cannot see order details during the commit phase, preventing sandwich attacks. Constant-time comparison prevents timing side-channels. In production, this would be replaced with EIP-712 or Ed25519 signatures. |
+
+#### 5. Domain Layer (`src/domain/`)
+
+Pure data types with no I/O — the vocabulary of the application. Enforces invariants via Rust's type system.
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **Order / OrderUid** | `order.rs` | `OrderUid(Uuid)` — newtype wrapper preventing accidental misuse. `OrderKind` enum (`Sell` / `Buy`). `OrderStatus` enum (`Open` / `Matched` / `Settled` / `Cancelled` / `Expired`). `Order` struct with all fields. `CreateOrderRequest` and `OrderQueryParams` DTOs. Methods: `limit_price()`, `is_expired()`, `is_matchable()`. | `OrderUid` derives `sqlx::Type(transparent)` for zero-cost DB mapping. Enums derive `sqlx::Type(rename_all = "lowercase")` for direct TEXT column mapping. `is_matchable()` combines status + expiry check in one predicate used throughout the solver. | **Compile-time safety**: you cannot pass a `Uuid` where an `OrderUid` is expected. The `OrderStatus` state machine is exhaustive — `match` on it forces handling of all states. `is_matchable()` centralises the definition of "eligible for matching" in one place. |
+| **Token / TokenPair** | `token.rs` | `Token` struct (id, symbol, name, decimals, address). `TokenPair` (base + quote). `CreateTokenRequest` DTO. | `Token` derives `sqlx::FromRow` for direct query mapping. `TokenPair` is a logical grouping used in solver algorithms. | Tokens form the whitelist. The `decimals` field enables correct amount interpretation. `TokenPair` makes market-level reasoning explicit in solver code. |
+| **Batch / BatchStatus** | `batch.rs` | `BatchStatus` enum (`Collecting` / `Solving` / `Settled` / `Failed`). `Batch` struct with timestamps (`created_at`, `solved_at`, `settled_at`) and `order_count`. | `Batch::new()` creates a batch in `Collecting` state. `is_collecting()` helper for status checks. `Default` impl delegates to `new()`. | The status enum models the batch lifecycle as a state machine. Timestamps on each transition enable performance analysis (how long did solving take? how long between collection and settlement?). |
+| **Settlement / Trade / ClearingPrice** | `settlement.rs` | `Settlement` (id, batch_id, solver_id, objective_value, surplus_total). `Trade` (order_uid, executed_sell, executed_buy, surplus). `ClearingPrice` (token_id, price). `SettlementDetails` — composite struct bundling all three. | All types derive `sqlx::FromRow` and `Serialize/Deserialize`. `SettlementDetails` is the API response type and the solver's output type. | `SettlementDetails` is the **single source of truth** for what happened in a batch. It's used for API responses, solver outputs, and persistence — one type, three use cases. |
+| **Solver / SolverResult** | `solver.rs` | `Solver` (id, name, active) — registered solver entity. `SolverResult` (solver metadata + `SettlementDetails` + score + duration). `is_better_than()` comparison method. | `Solver` is a DB entity (derives `FromRow`). `SolverResult` is the in-memory result used by the competition framework. | The `Solver` table enables dynamic solver registration without recompilation. `SolverResult::is_better_than()` encapsulates the ranking logic. |
+
+#### 6. Database Layer (`src/db/`)
+
+Repository pattern — each entity gets a dedicated repo with async methods returning `Result<T, AppError>`.
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **Pool** | `pool.rs` | Connection pool creation and migration runner. | `create_pool()`: `PgPoolOptions` with max 20 connections, min 2, 5s acquire timeout, 5min idle timeout, 30min max lifetime. `run_migrations()`: `sqlx::migrate!("./migrations")` embeds SQL files at compile time. | Pool settings balance throughput with resource usage. Compile-time migration embedding ensures the binary always has the correct schema. No external migration tool needed. |
+| **OrderRepo** | `order_repo.rs` | CRUD + batch operations for orders. Methods: `insert`, `find_by_uid`, `list` (with owner/status filters + pagination), `find_open_unassigned`, `assign_to_batch`, `update_status`, `cancel`, `update_batch_orders_status`, `expire_orders`. | All queries use `sqlx::query_as::<_, Order>` with raw SQL. `assign_to_batch` uses `WHERE uid = ANY($2)` for batch UPDATE. `expire_orders` uses `WHERE status = 'open' AND valid_to <= NOW()`. `list` uses nullable parameter pattern: `WHERE ($1::TEXT IS NULL OR owner = $1)`. | Raw SQL gives full control over query performance. Batch operations (`ANY`, bulk UPDATE) minimise round-trips. The nullable filter pattern avoids dynamic query building while supporting optional filters. |
+| **BatchRepo** | `batch_repo.rs` | Batch CRUD and lifecycle management. Methods: `create`, `find_by_id`, `get_current_collecting`, `update_status`, `mark_solved`, `list_recent`. | `get_current_collecting` uses `WHERE status = 'collecting' ORDER BY created_at DESC LIMIT 1`. `update_status` has special handling for `Settled` — it also sets `settled_at` timestamp. `mark_solved` sets `solved_at` and `order_count`. | The "current collecting batch" query is the entry point for the entire batch lifecycle. Timestamps are set at specific transitions for auditability. |
+| **SettlementRepo** | `settlement_repo.rs` | Transactional settlement persistence and composite retrieval. Methods: `insert_full`, `find_by_batch_id`. | `insert_full` uses `pool.begin()` to start a transaction, then INSERT settlement → INSERT trades (loop) → INSERT clearing_prices (loop with `ON CONFLICT DO UPDATE`) → `tx.commit()`. `find_by_batch_id` runs three sequential queries (settlement, trades, clearing_prices) and assembles `SettlementDetails`. | **Atomicity**: either the entire settlement (with all trades and prices) is persisted, or nothing is. No partial settlements. `ON CONFLICT` on clearing prices handles the rare case of duplicate token entries per settlement. |
+| **TokenRepo** | `token_repo.rs` | Token CRUD. Methods: `find_all`, `find_by_id`, `find_by_address`, `insert`, `exists`. | `exists` uses `SELECT EXISTS(SELECT 1 FROM tokens WHERE id = $1)` — returns `bool` directly. `find_all` orders by symbol for consistent API responses. | `exists()` is used by `OrderService` during order validation — it's an optimised check that doesn't load the full token row. |
+| **SolverRepo** | `solver_repo.rs` | Solver registry. Methods: `find_active`, etc. | Queries the `solvers` table filtered by `active = true`. | Enables dynamic solver management — solvers can be activated/deactivated at runtime via the database without restarting the server. |
+
+#### 7. Background Tasks (`src/tasks/`)
+
+| Component | File | What | How | Why |
+|-----------|------|------|-----|-----|
+| **BatchTimer** | `batch_timer.rs` | Periodic background task that drives the batch auction cycle. | Spawned as a `tokio::spawn` task in `startup.rs`. On startup, calls `ensure_collecting_batch()`. Then enters an infinite loop: `tokio::time::sleep(interval)` → `BatchService::close_and_solve()`. On success, logs batch ID. On failure, logs error and calls `ensure_collecting_batch()` for recovery — guaranteeing the system can always accept new orders. | This is the **clock of the system**. Without it, orders would accumulate forever. The recovery logic ensures the system self-heals after transient errors (DB hiccups, solver panics). The timer is decoupled from the HTTP server — they run concurrently on the Tokio runtime. |
 
 ---
 
