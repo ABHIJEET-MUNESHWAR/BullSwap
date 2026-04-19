@@ -113,7 +113,7 @@ pub fn find_cows(orders: &[Order]) -> CowFinderResult {
                 (*idx, *order, price)
             })
             .collect();
-        sellers.sort_by(|a, b| b.2.cmp(&a.2));
+        sellers.sort_by_key(|b| std::cmp::Reverse(b.2));
 
         // Backward orders (B→A): sell B, want A
         // buyer_price = buy_amount / sell_amount = min price of B in A the buyer demands
@@ -128,7 +128,7 @@ pub fn find_cows(orders: &[Order]) -> CowFinderResult {
                 (*idx, *order, price)
             })
             .collect();
-        buyers.sort_by(|a, b| a.2.cmp(&b.2));
+        buyers.sort_by_key(|a| a.2);
 
         // Greedily match overlapping orders
         let mut si = 0;
