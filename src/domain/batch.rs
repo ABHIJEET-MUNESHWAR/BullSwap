@@ -88,4 +88,3 @@ mod tests {
         assert_eq!(format!("{}", BatchStatus::Failed), "failed");
     }
 }
-

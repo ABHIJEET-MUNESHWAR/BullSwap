@@ -114,8 +114,7 @@ impl BatchService {
                 BatchRepo::update_status(pool, batch_id, BatchStatus::Settled).await?;
 
                 // Update order statuses to settled
-                OrderRepo::update_batch_orders_status(pool, batch_id, OrderStatus::Settled)
-                    .await?;
+                OrderRepo::update_batch_orders_status(pool, batch_id, OrderStatus::Settled).await?;
 
                 tracing::info!(
                     batch_id = %batch_id,
@@ -130,8 +129,7 @@ impl BatchService {
                 BatchRepo::update_status(pool, batch_id, BatchStatus::Failed).await?;
 
                 // Return orders to open status
-                OrderRepo::update_batch_orders_status(pool, batch_id, OrderStatus::Open)
-                    .await?;
+                OrderRepo::update_batch_orders_status(pool, batch_id, OrderStatus::Open).await?;
 
                 tracing::warn!(batch_id = %batch_id, "No valid solution found, batch failed");
             }
@@ -143,4 +141,3 @@ impl BatchService {
         Ok(Some(batch_id))
     }
 }
-

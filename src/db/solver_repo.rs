@@ -20,23 +20,21 @@ impl SolverRepo {
 
     /// Find a solver by ID.
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Solver>, AppError> {
-        let solver = sqlx::query_as::<_, Solver>(
-            "SELECT id, name, active FROM solvers WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+        let solver =
+            sqlx::query_as::<_, Solver>("SELECT id, name, active FROM solvers WHERE id = $1")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?;
         Ok(solver)
     }
 
     /// Find a solver by name.
     pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Solver>, AppError> {
-        let solver = sqlx::query_as::<_, Solver>(
-            "SELECT id, name, active FROM solvers WHERE name = $1",
-        )
-        .bind(name)
-        .fetch_optional(pool)
-        .await?;
+        let solver =
+            sqlx::query_as::<_, Solver>("SELECT id, name, active FROM solvers WHERE name = $1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await?;
         Ok(solver)
     }
 
@@ -56,4 +54,3 @@ impl SolverRepo {
         Ok(solver)
     }
 }
-

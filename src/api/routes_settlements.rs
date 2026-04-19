@@ -7,10 +7,7 @@ use crate::services::settlement_service::SettlementService;
 
 /// Configure settlement routes.
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/settlements")
-            .route("/{batch_id}", web::get().to(get_settlement)),
-    );
+    cfg.service(web::scope("/settlements").route("/{batch_id}", web::get().to(get_settlement)));
 }
 
 /// GET /v1/settlements/{batch_id} — Get settlement details by batch ID.
@@ -24,4 +21,3 @@ async fn get_settlement(
     let details = SettlementService::get_by_batch_id(pool.get_ref(), *batch_id).await?;
     Ok(HttpResponse::Ok().json(details))
 }
-

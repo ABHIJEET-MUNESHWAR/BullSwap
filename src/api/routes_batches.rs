@@ -36,14 +36,10 @@ async fn list_batches(
 
 /// GET /v1/batches/{id} — Get batch by ID.
 #[tracing::instrument(name = "get_batch", skip(pool))]
-async fn get_batch(
-    pool: web::Data<PgPool>,
-    id: web::Path<Uuid>,
-) -> AppResult<HttpResponse> {
+async fn get_batch(pool: web::Data<PgPool>, id: web::Path<Uuid>) -> AppResult<HttpResponse> {
     let batch = BatchRepo::find_by_id(pool.get_ref(), *id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Batch {} not found", id)))?;
 
     Ok(HttpResponse::Ok().json(batch))
 }
-

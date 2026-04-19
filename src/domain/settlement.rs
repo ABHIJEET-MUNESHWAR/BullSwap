@@ -95,4 +95,3 @@ mod tests {
         assert!(details.trades.is_empty());
     }
 }
-

@@ -124,7 +124,7 @@ mod tests {
             make_order(dec!(200), dec!(80)),
         ];
         let executions = vec![
-            (0, dec!(100), dec!(60)), // surplus = 10
+            (0, dec!(100), dec!(60)),  // surplus = 10
             (1, dec!(200), dec!(100)), // surplus = 20
         ];
         let total = calculate_total_surplus(&orders, &executions);
@@ -137,14 +137,10 @@ mod tests {
             make_order(dec!(100), dec!(50)),
             make_order(dec!(200), dec!(80)),
         ];
-        let executions = vec![
-            (0, dec!(100), dec!(60)),
-            (1, dec!(200), dec!(100)),
-        ];
+        let executions = vec![(0, dec!(100), dec!(60)), (1, dec!(200), dec!(100))];
         let distribution = distribute_surplus(&orders, &executions);
         assert_eq!(distribution.len(), 2);
         assert_eq!(distribution[0], (0, dec!(10)));
         assert_eq!(distribution[1], (1, dec!(20)));
     }
 }
-

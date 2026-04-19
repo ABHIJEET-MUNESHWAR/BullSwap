@@ -45,18 +45,11 @@ struct ErrorResponse {
 impl ResponseError for AppError {
     fn error_response(&self) -> HttpResponse {
         let (status, error_type) = match self {
-            AppError::Validation(_) => (
-                actix_web::http::StatusCode::BAD_REQUEST,
-                "validation_error",
-            ),
-            AppError::NotFound(_) => (
-                actix_web::http::StatusCode::NOT_FOUND,
-                "not_found",
-            ),
-            AppError::Conflict(_) => (
-                actix_web::http::StatusCode::CONFLICT,
-                "conflict",
-            ),
+            AppError::Validation(_) => {
+                (actix_web::http::StatusCode::BAD_REQUEST, "validation_error")
+            }
+            AppError::NotFound(_) => (actix_web::http::StatusCode::NOT_FOUND, "not_found"),
+            AppError::Conflict(_) => (actix_web::http::StatusCode::CONFLICT, "conflict"),
             AppError::Database(_) => (
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "database_error",
@@ -65,10 +58,9 @@ impl ResponseError for AppError {
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
             ),
-            AppError::Unauthorized(_) => (
-                actix_web::http::StatusCode::UNAUTHORIZED,
-                "unauthorized",
-            ),
+            AppError::Unauthorized(_) => {
+                (actix_web::http::StatusCode::UNAUTHORIZED, "unauthorized")
+            }
             AppError::RateLimited(_) => (
                 actix_web::http::StatusCode::TOO_MANY_REQUESTS,
                 "rate_limited",
@@ -117,7 +109,9 @@ mod tests {
     fn test_error_response_type() {
         let err = AppError::Internal("something broke".to_string());
         let resp = err.error_response();
-        assert_eq!(resp.status(), actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }
-

@@ -69,4 +69,3 @@ mod tests {
         assert!(!b.is_better_than(&a));
     }
 }
-

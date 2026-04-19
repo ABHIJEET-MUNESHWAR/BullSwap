@@ -37,4 +37,3 @@ async fn create_token(
     .await?;
     Ok(HttpResponse::Created().json(token))
 }
-

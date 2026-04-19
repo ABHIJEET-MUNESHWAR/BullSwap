@@ -14,10 +14,7 @@ pub fn extract_request_id(req: &ServiceRequest) -> String {
 ///
 /// If `expected_key` is None, all requests are allowed.
 /// If set, requests must include `Authorization: Bearer <key>`.
-pub fn validate_api_key(
-    req: &ServiceRequest,
-    expected_key: Option<&str>,
-) -> Result<(), Error> {
+pub fn validate_api_key(req: &ServiceRequest, expected_key: Option<&str>) -> Result<(), Error> {
     let expected = match expected_key {
         Some(k) => k,
         None => return Ok(()), // No auth required
@@ -42,4 +39,3 @@ pub fn validate_api_key(
         )),
     }
 }
-

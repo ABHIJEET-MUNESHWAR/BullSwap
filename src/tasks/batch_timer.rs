@@ -53,4 +53,3 @@ pub async fn run_batch_timer(
         }
     }
 }
-

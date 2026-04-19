@@ -1,7 +1,7 @@
 mod common;
 
-use bullswap::solver::cow_finder::find_cows;
 use bullswap::domain::order::{Order, OrderKind, OrderStatus, OrderUid};
+use bullswap::solver::cow_finder::find_cows;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -85,10 +85,7 @@ fn test_cow_finder_cancelled_orders_skipped() {
     let mut order = make_order(token_a, token_b, dec!(100), dec!(50));
     order.status = OrderStatus::Cancelled;
 
-    let orders = vec![
-        order,
-        make_order(token_b, token_a, dec!(50), dec!(100)),
-    ];
+    let orders = vec![order, make_order(token_b, token_a, dec!(50), dec!(100))];
 
     let result = find_cows(&orders);
     assert!(result.matches.is_empty());
@@ -111,4 +108,3 @@ fn test_cow_finder_surplus_distribution() {
     // With overlapping prices, surplus should be generated
     assert!(result.total_surplus >= dec!(0));
 }
-

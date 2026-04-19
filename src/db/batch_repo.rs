@@ -62,14 +62,12 @@ impl BatchRepo {
     ) -> Result<bool, AppError> {
         let result = if status == BatchStatus::Settled {
             let now = Utc::now();
-            sqlx::query(
-                "UPDATE batches SET status = $1, settled_at = $2 WHERE id = $3",
-            )
-            .bind(status.to_string())
-            .bind(now)
-            .bind(id)
-            .execute(pool)
-            .await?
+            sqlx::query("UPDATE batches SET status = $1, settled_at = $2 WHERE id = $3")
+                .bind(status.to_string())
+                .bind(now)
+                .bind(id)
+                .execute(pool)
+                .await?
         } else {
             sqlx::query("UPDATE batches SET status = $1 WHERE id = $2")
                 .bind(status.to_string())
@@ -81,18 +79,13 @@ impl BatchRepo {
     }
 
     /// Set the solved_at timestamp and update order count.
-    pub async fn mark_solved(
-        pool: &PgPool,
-        id: Uuid,
-        order_count: i64,
-    ) -> Result<bool, AppError> {
-        let result = sqlx::query(
-            "UPDATE batches SET solved_at = NOW(), order_count = $1 WHERE id = $2",
-        )
-        .bind(order_count)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    pub async fn mark_solved(pool: &PgPool, id: Uuid, order_count: i64) -> Result<bool, AppError> {
+        let result =
+            sqlx::query("UPDATE batches SET solved_at = NOW(), order_count = $1 WHERE id = $2")
+                .bind(order_count)
+                .bind(id)
+                .execute(pool)
+                .await?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -117,4 +110,3 @@ impl BatchRepo {
         Ok(batches)
     }
 }
-

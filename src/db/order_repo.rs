@@ -137,13 +137,11 @@ impl OrderRepo {
         uid: OrderUid,
         status: OrderStatus,
     ) -> Result<bool, AppError> {
-        let result = sqlx::query(
-            "UPDATE orders SET status = $1 WHERE uid = $2",
-        )
-        .bind(status.to_string())
-        .bind(uid.0)
-        .execute(pool)
-        .await?;
+        let result = sqlx::query("UPDATE orders SET status = $1 WHERE uid = $2")
+            .bind(status.to_string())
+            .bind(uid.0)
+            .execute(pool)
+            .await?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -164,13 +162,11 @@ impl OrderRepo {
         batch_id: Uuid,
         status: OrderStatus,
     ) -> Result<u64, AppError> {
-        let result = sqlx::query(
-            "UPDATE orders SET status = $1 WHERE batch_id = $2",
-        )
-        .bind(status.to_string())
-        .bind(batch_id)
-        .execute(pool)
-        .await?;
+        let result = sqlx::query("UPDATE orders SET status = $1 WHERE batch_id = $2")
+            .bind(status.to_string())
+            .bind(batch_id)
+            .execute(pool)
+            .await?;
         Ok(result.rows_affected())
     }
 
@@ -184,4 +180,3 @@ impl OrderRepo {
         Ok(result.rows_affected())
     }
 }
-

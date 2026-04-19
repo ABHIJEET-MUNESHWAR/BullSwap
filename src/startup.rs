@@ -26,10 +26,9 @@ pub async fn run_server(config: AppConfig) -> std::io::Result<()> {
         .expect("Failed to run database migrations");
 
     // Get solver IDs for the batch timer
-    let solvers = SolverRepo::find_active(&db_pool)
-        .await
-        .unwrap_or_default();
-    let solver_ids: Vec<(uuid::Uuid, String)> = solvers.iter().map(|s| (s.id, s.name.clone())).collect();
+    let solvers = SolverRepo::find_active(&db_pool).await.unwrap_or_default();
+    let solver_ids: Vec<(uuid::Uuid, String)> =
+        solvers.iter().map(|s| (s.id, s.name.clone())).collect();
 
     // Initialize Rayon thread pool for parallel solver execution
     rayon::ThreadPoolBuilder::new()
@@ -51,13 +50,8 @@ pub async fn run_server(config: AppConfig) -> std::io::Result<()> {
     let timer_solver_ids = solver_ids.clone();
 
     tokio::spawn(async move {
-        batch_timer::run_batch_timer(
-            timer_pool,
-            batch_interval,
-            max_orders,
-            timer_solver_ids,
-        )
-        .await;
+        batch_timer::run_batch_timer(timer_pool, batch_interval, max_orders, timer_solver_ids)
+            .await;
     });
 
     let addr = config.server_addr();
@@ -76,5 +70,3 @@ pub async fn run_server(config: AppConfig) -> std::io::Result<()> {
     .run()
     .await
 }
-
-

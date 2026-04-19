@@ -64,9 +64,7 @@ fn test_competition_no_solution_with_incompatible_orders() {
 
     // Only sell orders in one direction, no matching buys
     // The naive solver needs at least counter-orders to match
-    let orders = vec![
-        make_order(token_a, token_b, dec!(100), dec!(50)),
-    ];
+    let orders = vec![make_order(token_a, token_b, dec!(100), dec!(50))];
 
     let result = competition.run(&orders, Uuid::new_v4());
     // Single order with no counter-party: CoW finder can't match,
@@ -74,7 +72,10 @@ fn test_competition_no_solution_with_incompatible_orders() {
     // without counter-orders in a different direction.
     // The result may be None (no solution) since we need both sides.
     // With only one direction, the optimizer has no overlapping pairs.
-    assert!(result.is_none(), "Single-direction order should not produce a solution");
+    assert!(
+        result.is_none(),
+        "Single-direction order should not produce a solution"
+    );
 }
 
 #[test]
@@ -118,4 +119,3 @@ fn test_large_order_batch() {
     let result = result.unwrap();
     assert!(!result.settlement.trades.is_empty());
 }
-

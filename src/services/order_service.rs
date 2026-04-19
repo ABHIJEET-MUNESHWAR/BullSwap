@@ -21,10 +21,7 @@ impl OrderService {
     /// - sell_token and buy_token must exist
     /// - signature must not be empty
     /// - owner must not be empty
-    pub async fn create_order(
-        pool: &PgPool,
-        req: CreateOrderRequest,
-    ) -> AppResult<Order> {
+    pub async fn create_order(pool: &PgPool, req: CreateOrderRequest) -> AppResult<Order> {
         // Validate
         Self::validate_order(&req)?;
 
@@ -233,4 +230,3 @@ mod tests {
         assert!(OrderService::validate_order(&req).is_err());
     }
 }
-

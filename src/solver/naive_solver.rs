@@ -235,4 +235,3 @@ mod tests {
         assert!(result.score >= dec!(0));
     }
 }
-

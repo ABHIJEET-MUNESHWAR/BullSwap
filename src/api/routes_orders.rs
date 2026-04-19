@@ -50,10 +50,7 @@ async fn create_order(
 
 /// GET /v1/orders/{uid} — Get order by UID.
 #[tracing::instrument(name = "get_order", skip(pool))]
-async fn get_order(
-    pool: web::Data<PgPool>,
-    uid: web::Path<Uuid>,
-) -> AppResult<HttpResponse> {
+async fn get_order(pool: web::Data<PgPool>, uid: web::Path<Uuid>) -> AppResult<HttpResponse> {
     let order = OrderService::get_order(pool.get_ref(), OrderUid(*uid)).await?;
     Ok(HttpResponse::Ok().json(order))
 }
@@ -87,11 +84,7 @@ async fn list_orders(
 
 /// DELETE /v1/orders/{uid} — Cancel an open order.
 #[tracing::instrument(name = "cancel_order", skip(pool))]
-async fn cancel_order(
-    pool: web::Data<PgPool>,
-    uid: web::Path<Uuid>,
-) -> AppResult<HttpResponse> {
+async fn cancel_order(pool: web::Data<PgPool>, uid: web::Path<Uuid>) -> AppResult<HttpResponse> {
     OrderService::cancel_order(pool.get_ref(), OrderUid(*uid)).await?;
     Ok(HttpResponse::NoContent().finish())
 }
-

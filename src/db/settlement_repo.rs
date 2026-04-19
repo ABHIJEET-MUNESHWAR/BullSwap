@@ -18,7 +18,7 @@ impl SettlementRepo {
         objective_value: Decimal,
         surplus_total: Decimal,
         trades: &[(OrderUid, Decimal, Decimal, Decimal)], // (order_uid, exec_sell, exec_buy, surplus)
-        clearing_prices: &[(Uuid, Decimal)],               // (token_id, price)
+        clearing_prices: &[(Uuid, Decimal)],              // (token_id, price)
     ) -> Result<Settlement, AppError> {
         let mut tx = pool.begin().await?;
 
@@ -126,4 +126,3 @@ impl SettlementRepo {
         }))
     }
 }
-

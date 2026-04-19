@@ -18,4 +18,3 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     )
     .configure(routes_health::configure);
 }
-

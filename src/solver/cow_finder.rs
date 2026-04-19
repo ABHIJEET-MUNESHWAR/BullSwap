@@ -300,13 +300,9 @@ mod tests {
         let mut order = make_order(token_a, token_b, dec!(100), dec!(50));
         order.valid_to = Utc::now() - chrono::Duration::hours(1); // expired
 
-        let orders = vec![
-            order,
-            make_order(token_b, token_a, dec!(50), dec!(100)),
-        ];
+        let orders = vec![order, make_order(token_b, token_a, dec!(50), dec!(100))];
 
         let result = find_cows(&orders);
         assert!(result.matches.is_empty());
     }
 }
-

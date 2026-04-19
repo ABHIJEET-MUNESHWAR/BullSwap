@@ -11,8 +11,9 @@ pub async fn spawn_app() -> (String, PgPool) {
     let port = listener.local_addr().unwrap().port();
     drop(listener); // Free the port
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://bullswap:bullswap@localhost:5432/bullswap_test".to_string());
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://bullswap:bullswap@localhost:5432/bullswap_test".to_string()
+    });
 
     let pool = sqlx::PgPool::connect(&database_url)
         .await
@@ -32,10 +33,11 @@ pub async fn spawn_app() -> (String, PgPool) {
 #[allow(dead_code)]
 pub async fn cleanup(pool: &PgPool) {
     // Clean in reverse FK order
-    let _ = sqlx::query("DELETE FROM clearing_prices").execute(pool).await;
+    let _ = sqlx::query("DELETE FROM clearing_prices")
+        .execute(pool)
+        .await;
     let _ = sqlx::query("DELETE FROM trades").execute(pool).await;
     let _ = sqlx::query("DELETE FROM settlements").execute(pool).await;
     let _ = sqlx::query("DELETE FROM orders").execute(pool).await;
     let _ = sqlx::query("DELETE FROM batches").execute(pool).await;
 }
-

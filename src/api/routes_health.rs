@@ -44,4 +44,3 @@ async fn health_check(pool: web::Data<PgPool>) -> AppResult<HttpResponse> {
         Ok(HttpResponse::ServiceUnavailable().json(body))
     }
 }
-

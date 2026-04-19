@@ -30,4 +30,3 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateE
     tracing::info!("Database migrations completed");
     Ok(())
 }
-

@@ -132,7 +132,12 @@ mod tests {
     use crate::domain::order::{Order, OrderKind, OrderStatus, OrderUid};
     use chrono::Utc;
 
-    fn make_order(sell_token: Uuid, buy_token: Uuid, sell_amount: Decimal, buy_amount: Decimal) -> Order {
+    fn make_order(
+        sell_token: Uuid,
+        buy_token: Uuid,
+        sell_amount: Decimal,
+        buy_amount: Decimal,
+    ) -> Order {
         Order {
             uid: OrderUid::new(),
             owner: "0xTest".to_string(),
@@ -176,9 +181,7 @@ mod tests {
         let token_a = Uuid::new_v4();
         let token_b = Uuid::new_v4();
 
-        let orders = vec![
-            make_order(token_a, token_b, dec!(100), dec!(50)),
-        ];
+        let orders = vec![make_order(token_a, token_b, dec!(100), dec!(50))];
 
         let mut prices = HashMap::new();
         prices.insert(token_a, dec!(2));
@@ -193,4 +196,3 @@ mod tests {
         assert_eq!(*exec_buy, dec!(200));
     }
 }
-

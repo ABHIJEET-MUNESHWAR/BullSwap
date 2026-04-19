@@ -17,13 +17,17 @@ impl SettlementService {
         result: &SolveResult,
         batch_id: Uuid,
     ) -> AppResult<()> {
-        let trades: Vec<(OrderUid, rust_decimal::Decimal, rust_decimal::Decimal, rust_decimal::Decimal)> =
-            result
-                .settlement
-                .trades
-                .iter()
-                .map(|t| (t.order_uid, t.executed_sell, t.executed_buy, t.surplus))
-                .collect();
+        let trades: Vec<(
+            OrderUid,
+            rust_decimal::Decimal,
+            rust_decimal::Decimal,
+            rust_decimal::Decimal,
+        )> = result
+            .settlement
+            .trades
+            .iter()
+            .map(|t| (t.order_uid, t.executed_sell, t.executed_buy, t.surplus))
+            .collect();
 
         let clearing_prices: Vec<(Uuid, rust_decimal::Decimal)> = result
             .settlement
@@ -54,10 +58,7 @@ impl SettlementService {
     }
 
     /// Get settlement details by batch ID.
-    pub async fn get_by_batch_id(
-        pool: &PgPool,
-        batch_id: Uuid,
-    ) -> AppResult<SettlementDetails> {
+    pub async fn get_by_batch_id(pool: &PgPool, batch_id: Uuid) -> AppResult<SettlementDetails> {
         SettlementRepo::find_by_batch_id(pool, batch_id)
             .await?
             .ok_or_else(|| {
@@ -65,4 +66,3 @@ impl SettlementService {
             })
     }
 }
-

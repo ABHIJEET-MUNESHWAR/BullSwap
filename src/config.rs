@@ -37,15 +37,19 @@ impl AppConfig {
         let port = env::var("PORT")
             .unwrap_or_else(|_| "8080".to_string())
             .parse::<u16>()
-            .map_err(|_| ConfigError::Invalid("PORT".to_string(), "must be a valid u16".to_string()))?;
+            .map_err(|_| {
+                ConfigError::Invalid("PORT".to_string(), "must be a valid u16".to_string())
+            })?;
 
         let batch_interval_secs = env::var("BATCH_INTERVAL_SECS")
             .unwrap_or_else(|_| "30".to_string())
             .parse::<u64>()
-            .map_err(|_| ConfigError::Invalid(
-                "BATCH_INTERVAL_SECS".to_string(),
-                "must be a valid u64".to_string(),
-            ))?;
+            .map_err(|_| {
+                ConfigError::Invalid(
+                    "BATCH_INTERVAL_SECS".to_string(),
+                    "must be a valid u64".to_string(),
+                )
+            })?;
 
         let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
 
@@ -54,18 +58,22 @@ impl AppConfig {
         let max_orders_per_batch = env::var("MAX_ORDERS_PER_BATCH")
             .unwrap_or_else(|_| "1000".to_string())
             .parse::<usize>()
-            .map_err(|_| ConfigError::Invalid(
-                "MAX_ORDERS_PER_BATCH".to_string(),
-                "must be a valid usize".to_string(),
-            ))?;
+            .map_err(|_| {
+                ConfigError::Invalid(
+                    "MAX_ORDERS_PER_BATCH".to_string(),
+                    "must be a valid usize".to_string(),
+                )
+            })?;
 
         let solver_threads = env::var("SOLVER_THREADS")
             .unwrap_or_else(|_| num_cpus().to_string())
             .parse::<usize>()
-            .map_err(|_| ConfigError::Invalid(
-                "SOLVER_THREADS".to_string(),
-                "must be a valid usize".to_string(),
-            ))?;
+            .map_err(|_| {
+                ConfigError::Invalid(
+                    "SOLVER_THREADS".to_string(),
+                    "must be a valid usize".to_string(),
+                )
+            })?;
 
         Ok(AppConfig {
             database_url,
@@ -126,4 +134,3 @@ mod tests {
         assert!(cpus >= 1);
     }
 }
-

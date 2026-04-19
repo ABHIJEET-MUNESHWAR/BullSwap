@@ -98,50 +98,69 @@ mod tests {
 
     #[test]
     fn test_commitment_creation_and_verification() {
-        let commitment = create_commitment(
-            "0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123",
-        );
+        let commitment = create_commitment("0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123");
 
         assert!(verify_commitment(
             &commitment,
-            "0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123",
+            "0xAlice",
+            "0xETH",
+            "0xUSDC",
+            "100",
+            "50",
+            "nonce123",
         ));
     }
 
     #[test]
     fn test_commitment_fails_with_wrong_data() {
-        let commitment = create_commitment(
-            "0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123",
-        );
+        let commitment = create_commitment("0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123");
 
         assert!(!verify_commitment(
             &commitment,
-            "0xBob", "0xETH", "0xUSDC", "100", "50", "nonce123",
+            "0xBob",
+            "0xETH",
+            "0xUSDC",
+            "100",
+            "50",
+            "nonce123",
         ));
     }
 
     #[test]
     fn test_commitment_fails_with_different_amount() {
-        let commitment = create_commitment(
-            "0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123",
-        );
+        let commitment = create_commitment("0xAlice", "0xETH", "0xUSDC", "100", "50", "nonce123");
 
         assert!(!verify_commitment(
             &commitment,
-            "0xAlice", "0xETH", "0xUSDC", "200", "50", "nonce123",
+            "0xAlice",
+            "0xETH",
+            "0xUSDC",
+            "200",
+            "50",
+            "nonce123",
         ));
     }
 
     #[test]
     fn test_signature_roundtrip() {
         let sig = sign_order("0xAlice", "order_data_123", "secret_key");
-        assert!(verify_signature("0xAlice", "order_data_123", "secret_key", &sig));
+        assert!(verify_signature(
+            "0xAlice",
+            "order_data_123",
+            "secret_key",
+            &sig
+        ));
     }
 
     #[test]
     fn test_signature_fails_wrong_secret() {
         let sig = sign_order("0xAlice", "order_data_123", "secret_key");
-        assert!(!verify_signature("0xAlice", "order_data_123", "wrong_key", &sig));
+        assert!(!verify_signature(
+            "0xAlice",
+            "order_data_123",
+            "wrong_key",
+            &sig
+        ));
     }
 
     #[test]
@@ -151,4 +170,3 @@ mod tests {
         assert!(!constant_time_eq(b"hello", b"hell"));
     }
 }
-

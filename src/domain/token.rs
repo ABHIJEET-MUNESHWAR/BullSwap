@@ -62,4 +62,3 @@ mod tests {
         assert_eq!(pair.quote.symbol, "USDC");
     }
 }
-

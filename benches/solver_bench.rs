@@ -75,13 +75,9 @@ fn bench_cow_finder(c: &mut Criterion) {
 
     for size in [10, 100, 500, 1000, 5000] {
         let orders = generate_orders(size);
-        group.bench_with_input(
-            BenchmarkId::new("find_cows", size),
-            &orders,
-            |b, orders| {
-                b.iter(|| cow_finder::find_cows(black_box(orders)));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("find_cows", size), &orders, |b, orders| {
+            b.iter(|| cow_finder::find_cows(black_box(orders)));
+        });
     }
 
     group.finish();
@@ -116,7 +112,9 @@ fn bench_surplus(c: &mut Criterion) {
             BenchmarkId::new("calculate_total_surplus", size),
             &(&orders, &executions),
             |b, (orders, executions)| {
-                b.iter(|| surplus::calculate_total_surplus(black_box(orders), black_box(executions)));
+                b.iter(|| {
+                    surplus::calculate_total_surplus(black_box(orders), black_box(executions))
+                });
             },
         );
     }
@@ -131,13 +129,9 @@ fn bench_naive_solver(c: &mut Criterion) {
         let orders = generate_orders(size);
         let solver = NaiveSolver::new(Uuid::new_v4());
 
-        group.bench_with_input(
-            BenchmarkId::new("solve", size),
-            &orders,
-            |b, orders| {
-                b.iter(|| solver.solve(black_box(orders), Uuid::new_v4()));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("solve", size), &orders, |b, orders| {
+            b.iter(|| solver.solve(black_box(orders), Uuid::new_v4()));
+        });
     }
 
     group.finish();
@@ -173,4 +167,3 @@ criterion_group!(
     bench_solver_competition,
 );
 criterion_main!(benches);
-

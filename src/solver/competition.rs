@@ -111,7 +111,12 @@ mod tests {
     use chrono::Utc;
     use rust_decimal_macros::dec;
 
-    fn make_order(sell_token: Uuid, buy_token: Uuid, sell_amount: rust_decimal::Decimal, buy_amount: rust_decimal::Decimal) -> Order {
+    fn make_order(
+        sell_token: Uuid,
+        buy_token: Uuid,
+        sell_amount: rust_decimal::Decimal,
+        buy_amount: rust_decimal::Decimal,
+    ) -> Order {
         Order {
             uid: OrderUid::new(),
             owner: "0xTest".to_string(),
@@ -180,4 +185,3 @@ mod tests {
         assert!(result.is_none());
     }
 }
-
